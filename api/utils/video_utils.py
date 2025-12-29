@@ -6,12 +6,111 @@ Video processing utilities for SAM3 API
 
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
+
+
+def _convert_video_to_h264(input_path: str, output_path: str) -> bool:
+    """
+    Convert video to H.264 codec using FFmpeg for better compatibility.
+    
+    Args:
+        input_path: Path to input video
+        output_path: Path to output video
+    
+    Returns:
+        True if conversion successful
+    """
+    try:
+        cmd = [
+            'ffmpeg', '-y',
+            '-i', input_path,
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-c:a', 'aac',
+            '-strict', 'experimental',
+            output_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, timeout=600)
+        return result.returncode == 0 and os.path.exists(output_path)
+    except Exception as e:
+        print(f"FFmpeg conversion failed: {e}")
+        return False
+
+
+def _extract_frames_with_ffmpeg(
+    video_path: str,
+    output_dir: str,
+    max_frames: Optional[int] = None
+) -> Tuple[List[str], int, Tuple[int, int]]:
+    """
+    Extract frames using FFmpeg (more codec support than OpenCV).
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Get video info using ffprobe
+    probe_cmd = [
+        'ffprobe', '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height,r_frame_rate,nb_frames',
+        '-of', 'csv=p=0',
+        video_path
+    ]
+    
+    try:
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        parts = result.stdout.strip().split(',')
+        width = int(parts[0])
+        height = int(parts[1])
+        # Parse frame rate (e.g., "30/1" or "30000/1001")
+        fps_parts = parts[2].split('/')
+        fps = int(float(fps_parts[0]) / float(fps_parts[1])) if len(fps_parts) == 2 else int(float(fps_parts[0]))
+        fps = max(1, fps)  # Ensure at least 1 fps
+    except Exception as e:
+        print(f"FFprobe failed, using defaults: {e}")
+        fps = 30
+        width, height = 1920, 1080
+    
+    # Extract frames with ffmpeg
+    output_pattern = os.path.join(output_dir, '%05d.jpg')
+    
+    ffmpeg_cmd = [
+        'ffmpeg', '-y',
+        '-i', video_path,
+        '-q:v', '2',  # High quality JPEG
+    ]
+    
+    if max_frames:
+        ffmpeg_cmd.extend(['-frames:v', str(max_frames)])
+    
+    ffmpeg_cmd.append(output_pattern)
+    
+    try:
+        subprocess.run(ffmpeg_cmd, capture_output=True, timeout=600)
+    except Exception as e:
+        raise RuntimeError(f"FFmpeg frame extraction failed: {e}")
+    
+    # Get list of extracted frames
+    frame_paths = sorted([
+        os.path.join(output_dir, f) for f in os.listdir(output_dir)
+        if f.endswith('.jpg')
+    ])
+    
+    if not frame_paths:
+        raise RuntimeError("No frames extracted from video")
+    
+    # Get actual dimensions from first frame
+    first_frame = cv2.imread(frame_paths[0])
+    if first_frame is not None:
+        height, width = first_frame.shape[:2]
+    
+    return frame_paths, fps, (width, height)
 
 
 def extract_frames_from_video(
@@ -21,6 +120,7 @@ def extract_frames_from_video(
 ) -> Tuple[List[str], int, Tuple[int, int]]:
     """
     Extract frames from a video file to JPEG images.
+    Uses FFmpeg as fallback for problematic codecs (AV1, VP9, etc.)
     
     Args:
         video_path: Path to input video file
@@ -32,25 +132,55 @@ def extract_frames_from_video(
     """
     os.makedirs(output_dir, exist_ok=True)
     
+    # First try with OpenCV
     cap = cv2.VideoCapture(video_path)
+    
     if not cap.isOpened():
-        raise ValueError(f"Could not open video file: {video_path}")
+        print("OpenCV failed to open video, trying FFmpeg...")
+        cap.release()
+        return _extract_frames_with_ffmpeg(video_path, output_dir, max_frames)
     
     fps = int(cap.get(cv2.CAP_PROP_FPS))
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     
+    # Check if video metadata is valid
+    if fps <= 0 or width <= 0 or height <= 0:
+        print("Invalid video metadata, trying FFmpeg...")
+        cap.release()
+        return _extract_frames_with_ffmpeg(video_path, output_dir, max_frames)
+    
     if max_frames:
         total_frames = min(total_frames, max_frames)
     
     frame_paths = []
     frame_idx = 0
+    consecutive_failures = 0
     
     while frame_idx < total_frames:
         ret, frame = cap.read()
+        
         if not ret:
-            break
+            consecutive_failures += 1
+            # If too many consecutive failures, switch to FFmpeg
+            if consecutive_failures > 10:
+                print(f"Too many read failures at frame {frame_idx}, switching to FFmpeg...")
+                cap.release()
+                # Clean up partial extraction
+                for p in frame_paths:
+                    try:
+                        os.remove(p)
+                    except:
+                        pass
+                return _extract_frames_with_ffmpeg(video_path, output_dir, max_frames)
+            continue
+        
+        consecutive_failures = 0
+        
+        # Check if frame is valid (not empty/corrupt)
+        if frame is None or frame.size == 0:
+            continue
         
         frame_path = os.path.join(output_dir, f"{frame_idx:05d}.jpg")
         cv2.imwrite(frame_path, frame)
@@ -58,6 +188,12 @@ def extract_frames_from_video(
         frame_idx += 1
     
     cap.release()
+    
+    # If we got no frames, try FFmpeg
+    if not frame_paths:
+        print("No frames extracted with OpenCV, trying FFmpeg...")
+        return _extract_frames_with_ffmpeg(video_path, output_dir, max_frames)
+    
     return frame_paths, fps, (width, height)
 
 
@@ -127,8 +263,6 @@ def create_video_with_alpha(
     Returns:
         Path to the created video
     """
-    import subprocess
-    
     if not frames:
         raise ValueError("No frames provided")
     
@@ -277,17 +411,50 @@ def get_video_info(video_path: str) -> dict:
     Returns:
         Dictionary with video information
     """
+    # Try FFprobe first (more reliable for various codecs)
+    try:
+        probe_cmd = [
+            'ffprobe', '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height,r_frame_rate,nb_frames,codec_name',
+            '-show_entries', 'format=duration',
+            '-of', 'json',
+            video_path
+        ]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            import json
+            data = json.loads(result.stdout)
+            stream = data.get('streams', [{}])[0]
+            fmt = data.get('format', {})
+            
+            fps_parts = stream.get('r_frame_rate', '30/1').split('/')
+            fps = int(float(fps_parts[0]) / float(fps_parts[1])) if len(fps_parts) == 2 else 30
+            
+            return {
+                "width": int(stream.get('width', 0)),
+                "height": int(stream.get('height', 0)),
+                "fps": fps,
+                "total_frames": int(stream.get('nb_frames', 0)) or int(float(fmt.get('duration', 0)) * fps),
+                "duration_seconds": float(fmt.get('duration', 0)),
+                "codec": stream.get('codec_name', 'unknown'),
+            }
+    except Exception as e:
+        print(f"FFprobe failed: {e}, falling back to OpenCV")
+    
+    # Fallback to OpenCV
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise ValueError(f"Could not open video file: {video_path}")
     
+    fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
     info = {
         "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
         "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-        "fps": int(cap.get(cv2.CAP_PROP_FPS)),
+        "fps": fps,
         "total_frames": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
-        "duration_seconds": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / int(cap.get(cv2.CAP_PROP_FPS)),
-        "codec": int(cap.get(cv2.CAP_PROP_FOURCC))
+        "duration_seconds": int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / fps if fps > 0 else 0,
+        "codec": "unknown",
     }
     
     cap.release()
@@ -297,6 +464,7 @@ def get_video_info(video_path: str) -> dict:
 def load_video_frames(video_path: str) -> Tuple[List[np.ndarray], int]:
     """
     Load all frames from a video file.
+    Uses FFmpeg as fallback for problematic codecs.
     
     Args:
         video_path: Path to video file
@@ -304,21 +472,62 @@ def load_video_frames(video_path: str) -> Tuple[List[np.ndarray], int]:
     Returns:
         Tuple of (list of frames in RGB, fps)
     """
+    # First try OpenCV
     cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError(f"Could not open video file: {video_path}")
     
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    if not cap.isOpened():
+        # Fallback: use FFmpeg to extract to temp dir, then load
+        print("OpenCV failed to open video for frame loading, using FFmpeg...")
+        return _load_frames_via_ffmpeg(video_path)
+    
+    fps = int(cap.get(cv2.CAP_PROP_FPS)) or 30
     frames = []
+    consecutive_failures = 0
     
     while True:
         ret, frame = cap.read()
         if not ret:
-            break
+            consecutive_failures += 1
+            if consecutive_failures > 10:
+                break
+            continue
+        
+        consecutive_failures = 0
+        
+        if frame is None or frame.size == 0:
+            continue
+        
         # Convert BGR to RGB
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         frames.append(frame_rgb)
     
     cap.release()
+    
+    # If we got very few or no frames, try FFmpeg
+    if len(frames) < 5:
+        print(f"Only got {len(frames)} frames with OpenCV, trying FFmpeg...")
+        return _load_frames_via_ffmpeg(video_path)
+    
     return frames, fps
 
+
+def _load_frames_via_ffmpeg(video_path: str) -> Tuple[List[np.ndarray], int]:
+    """
+    Load video frames using FFmpeg extraction.
+    """
+    temp_dir = tempfile.mkdtemp()
+    
+    try:
+        frame_paths, fps, _ = _extract_frames_with_ffmpeg(video_path, temp_dir)
+        
+        frames = []
+        for path in frame_paths:
+            frame = cv2.imread(path)
+            if frame is not None:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames.append(frame_rgb)
+        
+        return frames, fps
+        
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
