@@ -151,3 +151,6 @@ Thumbs.db
 # BPE vocabulary files
 *.bpe
 *.vocab
+
+# SAM3 API outputs
+outputs/
