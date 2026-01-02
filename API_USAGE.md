@@ -15,11 +15,17 @@ Replace with your actual deployed service URL.
 ## 📋 Available Endpoints
 
 ### 1. Health Check
+
 ### 2. Root Information
+
 ### 3. Video Segmentation (General)
+
 ### 4. Video Segmentation (Dog-specific)
+
 ### 5. Download Processed Video
+
 ### 6. List All Tasks
+
 ### 7. Cleanup Task
 
 ---
@@ -31,11 +37,13 @@ Replace with your actual deployed service URL.
 Check API status, GPU availability, and model loading status.
 
 **cURL Example:**
+
 ```bash
 curl -X GET "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/health"
 ```
 
 **Response:**
+
 ```json
 {
   "status": "healthy",
@@ -53,11 +61,13 @@ curl -X GET "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/health"
 Get basic API information and available endpoints.
 
 **cURL Example:**
+
 ```bash
 curl -X GET "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/"
 ```
 
 **Response:**
+
 ```json
 {
   "name": "SAM3 Video Segmentation API",
@@ -75,6 +85,7 @@ curl -X GET "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/"
 Segment any object from a video using a text prompt.
 
 **Parameters:**
+
 - `video` (required): Video file (MP4, MOV, AVI, MKV, WebM, M4V)
 - `prompt` (optional, default: "dog"): Text description of object to segment
 - `background_mode` (optional, default: "black"): Background style
@@ -88,6 +99,7 @@ Segment any object from a video using a text prompt.
 - `gcs_bucket` (optional, default: "nannie_sam3"): GCS bucket name
 
 **cURL Example 1 - Basic (Segment a dog with black background):**
+
 ```bash
 curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
   -F "video=@input.mp4" \
@@ -96,6 +108,7 @@ curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
 ```
 
 **cURL Example 2 - Segment a cat with white background:**
+
 ```bash
 curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
   -F "video=@my_cat_video.mp4" \
@@ -105,6 +118,7 @@ curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
 ```
 
 **cURL Example 3 - Segment a person with blurred background:**
+
 ```bash
 curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
   -F "video=@person_video.mp4" \
@@ -114,6 +128,7 @@ curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
 ```
 
 **cURL Example 4 - Disable GCS upload:**
+
 ```bash
 curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
   -F "video=@input.mp4" \
@@ -122,6 +137,7 @@ curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -143,6 +159,7 @@ Quick endpoint specifically for dog segmentation.
 **Parameters:** Same as `/segment` but `prompt` is fixed to "dog"
 
 **cURL Example:**
+
 ```bash
 curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment/dog" \
   -F "video=@dog_video.mp4" \
@@ -151,11 +168,12 @@ curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment/dog" \
 
 ---
 
-### 5. **GET /download/{task_id}/{filename}** - Download Video
+### 5. **GET /download//** - Download Video
 
 Download a processed video file.
 
 **cURL Example:**
+
 ```bash
 # Download the segmented video
 curl -O "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/download/abc-123/segmented.mp4"
@@ -166,11 +184,12 @@ curl -o my_output.mp4 "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/download
 
 ---
 
-### 6. **GET /outputs/{task_id}/{filename}** - Direct File Access
+### 6. **GET /outputs//** - Direct File Access
 
 Access output videos directly (served as static files).
 
 **cURL Example:**
+
 ```bash
 # View in browser or download
 curl -O "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/outputs/abc-123/segmented.mp4"
@@ -183,11 +202,13 @@ curl -O "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/outputs/abc-123/segmen
 List all processing tasks and their files.
 
 **cURL Example:**
+
 ```bash
 curl -X GET "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/tasks"
 ```
 
 **Response:**
+
 ```json
 {
   "total_tasks": 2,
@@ -208,16 +229,18 @@ curl -X GET "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/tasks"
 
 ---
 
-### 8. **DELETE /cleanup/{task_id}** - Cleanup Task
+### 8. **DELETE /cleanup/** - Cleanup Task
 
 Delete files for a completed task to free up storage.
 
 **cURL Example:**
+
 ```bash
 curl -X DELETE "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/cleanup/abc-123"
 ```
 
 **Response:**
+
 ```json
 {
   "success": true,
@@ -230,6 +253,7 @@ curl -X DELETE "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/cleanup/abc-123
 ## 🐍 Python Examples
 
 ### Basic Example
+
 ```python
 import requests
 
@@ -243,10 +267,10 @@ with open('input.mp4', 'rb') as video_file:
         'background_mode': 'black',
         'output_format': 'mp4'
     }
-    
+  
     response = requests.post(f"{SERVICE_URL}/segment", files=files, data=data)
     result = response.json()
-    
+  
     print(f"Success: {result['success']}")
     print(f"Output: {result['output_video_path']}")
 
@@ -254,14 +278,15 @@ with open('input.mp4', 'rb') as video_file:
 if result['success']:
     output_url = f"{SERVICE_URL}{result['output_video_path']}"
     video_data = requests.get(output_url).content
-    
+  
     with open('output.mp4', 'wb') as f:
         f.write(video_data)
-    
+  
     print("Downloaded: output.mp4")
 ```
 
 ### Complete Workflow Example
+
 ```python
 import requests
 import time
@@ -315,6 +340,7 @@ print(f"Check GCS: {result['message']}")
 ## 🎬 Common Use Cases
 
 ### Use Case 1: Remove Background from Dog Video
+
 ```bash
 curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
   -F "video=@dog_playing.mp4" \
@@ -330,6 +356,7 @@ curl -O "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/outputs/${TASK_ID}/seg
 ```
 
 ### Use Case 2: Create Transparent Background Video
+
 ```bash
 curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
   -F "video=@person.mp4" \
@@ -339,6 +366,7 @@ curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
 ```
 
 ### Use Case 3: Batch Processing Multiple Videos
+
 ```bash
 #!/bin/bash
 for video in videos/*.mp4; do
@@ -360,16 +388,19 @@ All processed videos are automatically uploaded to GCS:
 **Location:** `gs://nannie_sam3/outputs/<task_id>/`
 
 **List outputs:**
+
 ```bash
 gsutil ls gs://nannie_sam3/outputs/
 ```
 
 **Download from GCS:**
+
 ```bash
 gsutil cp gs://nannie_sam3/outputs/abc-123/segmented.mp4 ./
 ```
 
 **Download all outputs:**
+
 ```bash
 gsutil -m cp -r gs://nannie_sam3/outputs/* ./local_outputs/
 ```
@@ -414,17 +445,21 @@ Test all endpoints directly in your browser!
 ## ⚙️ Configuration
 
 ### Background Modes
+
 - **black**: Solid black background (fast, works with all formats)
 - **white**: Solid white background (fast, works with all formats)
 - **blur**: Blurred version of original background (moderate speed)
 - **transparent**: Alpha channel transparency (requires WebM/MOV format)
 
 ### Supported Video Formats
-**Input:** MP4, MOV, AVI, MKV, WebM, M4V  
+
+**Input:** MP4, MOV, AVI, MKV, WebM, M4V
 **Output:** MP4, WebM, MOV
 
 ### Segmentation Prompts
+
 Use natural language to describe what to segment:
+
 - "dog"
 - "cat"
 - "person"
@@ -438,16 +473,19 @@ Use natural language to describe what to segment:
 ## 🚨 Troubleshooting
 
 ### 500 Internal Server Error
+
 - Check if model is loaded: `curl <service-url>/health`
 - Verify video format is supported
 - Check Cloud Run logs: `gcloud run services logs read sam3-api-service --region=europe-west4`
 
 ### Timeout Errors
+
 - Video processing can take time (30s - 2min depending on length)
 - Increase timeout in your client: `timeout=600` (10 minutes)
 - Check GPU availability in health endpoint
 
 ### No Objects Detected
+
 - Try a clearer, more specific prompt
 - Ensure the object is visible in the video
 - Try with `include_overlay=true` to see what was detected
@@ -500,7 +538,3 @@ curl -O "https://sam3-api-service-g6gkfu4ava-ez.a.run.app<output_video_path>"
 # 4. Clean up (optional)
 curl -X DELETE "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/cleanup/<task_id>"
 ```
-
----
-
-**Made with ❤️ using Meta's SAM3 and Google Cloud Run**
