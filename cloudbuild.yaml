@@ -52,7 +52,7 @@ steps:
       - '--execution-environment=gen2'
       - '--memory=32Gi'
       - '--cpu=8'
-      - '--timeout=900'
+      - '--timeout=1200'
       - '--max-instances=1'
       - '--min-instances=0'
       - '--gpu=1'
