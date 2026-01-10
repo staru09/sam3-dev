@@ -28,8 +28,6 @@ COPY weights /app/weights
 
 # Copy API application code
 COPY api ./api
-COPY run_api.py .
-COPY health_check.py .
 
 # Create outputs directory
 RUN mkdir -p /app/outputs
@@ -39,6 +37,7 @@ ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 ENV PROJECT_ID=nannieai-website-stealth
 ENV NVIDIA_VISIBLE_DEVICES=all
+
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
 ENV OMP_NUM_THREADS=4

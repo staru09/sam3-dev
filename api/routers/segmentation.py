@@ -92,7 +92,7 @@ async def segment_from_video(
         description="Text prompt describing what to segment"
     ),
     background_mode: BackgroundMode = Form(
-        default=BackgroundMode.TRANSPARENT,
+        default=BackgroundMode.BLACK,
         description="Background removal mode"
     ),
     output_format: OutputFormat = Form(
