@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from api.core.config import OUTPUT_DIR
+from api.core.worker import worker
 from api.services.sam3_service import sam3_service
 
 
@@ -16,7 +17,8 @@ from api.services.sam3_service import sam3_service
 async def lifespan(app: FastAPI):
     """
     Application lifespan handler.
-    Loads the model on startup and cleans up on shutdown.
+    Starts background worker and loads the model on startup.
+    Cleans up on shutdown.
     """
     # Startup
     print("=" * 60)
@@ -25,6 +27,9 @@ async def lifespan(app: FastAPI):
     
     # Create output directory
     OUTPUT_DIR.mkdir(exist_ok=True)
+    
+    # Start background worker
+    worker.start()
     
     # Load the SAM3 model
     try:
@@ -38,5 +43,6 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     print("Shutting down SAM3 service...")
+    worker.stop()
     sam3_service.shutdown()
     print("Cleanup complete.")

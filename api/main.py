@@ -10,15 +10,13 @@ visible, with the background removed.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
-from api.core.config import OUTPUT_DIR, CORS_SETTINGS
+from api.core.config import CORS_SETTINGS
 from api.core.lifespan import lifespan
 from api.routers import (
     health_router,
     segmentation_router,
-    download_router,
-    tasks_router,
+    poll_router,
 )
 
 
@@ -34,29 +32,26 @@ app = FastAPI(
     ### Features:
     - **Text-based segmentation**: Simply describe what you want to keep (e.g., "dog", "cat", "person")
     - **Multiple background modes**: Transparent, black, white, or blurred background
-    - **Multiple output formats**: MP4, WebM (with alpha), MOV
+    - **Async processing**: Submit jobs and poll for status
+    - **Auto-cleanup**: Local files are automatically cleaned up after GCS upload
     
-    ### Example Usage:
-    1. Upload a video with a dog
-    2. Set prompt to "dog"
-    3. Get back a video with only the dog visible
+    ### Workflow:
+    1. POST to `/segment/dog` with video details
+    2. Receive `task_id` immediately (202 Accepted)
+    3. Poll `/poll/{task_id}` for status and progress
+    4. Get GCS URLs in the result when completed
     """,
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
 # Add CORS middleware
 app.add_middleware(CORSMiddleware, **CORS_SETTINGS)
 
-# Mount static files for serving output videos
-OUTPUT_DIR.mkdir(exist_ok=True)
-app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
-
 # Include routers
 app.include_router(health_router)
 app.include_router(segmentation_router)
-app.include_router(download_router)
-app.include_router(tasks_router)
+app.include_router(poll_router)
 
 
 if __name__ == "__main__":

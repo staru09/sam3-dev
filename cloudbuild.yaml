@@ -1,4 +1,7 @@
 substitutions: 
+  # Default values - can be overridden via --substitutions flag
+  # Note: If _TAG is explicitly set to empty via --substitutions=_TAG=, it will override this default
+  # Make sure to always provide a non-empty value for _TAG when using substitutions
   _TAG: latest
   _REGION: europe-west4
   _WEIGHTS_BUCKET: gs://nannie_sam3

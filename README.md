@@ -59,22 +59,40 @@ This breakthrough is driven by an innovative data engine that has automatically 
 
 ### Prerequisites
 
-- Python 3.12 or higher
+- Python 3.8+ (Python 3.11 or 3.12 recommended)
 - PyTorch 2.7 or higher
-- CUDA-compatible GPU with CUDA 12.6 or higher
+- CUDA-compatible GPU with CUDA 12.6 or higher (12.1+ supported)
+
+### Standard Installation
 
 1. **Create a new Conda environment:**
 
 ```bash
 conda create -n sam3 python=3.12
-conda deactivate
 conda activate sam3
 ```
 
 2. **Install PyTorch with CUDA support:**
 
+⚠️ **Critical**: Install PyTorch with the correct CUDA version for your system.
+
 ```bash
-pip install torch==2.7.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu126
+# For CUDA 12.6 (recommended for deployment)
+pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu126
+
+# For CUDA 12.1 (if using older CUDA)
+pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu121
+```
+
+**Verify CUDA installation:**
+```bash
+python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda}')"
+```
+
+Expected output:
+```
+CUDA available: True
+CUDA version: 12.6 (or your installed version)
 ```
 
 3. **Clone the repository and install the package:**
@@ -85,23 +103,52 @@ cd sam3
 pip install -e .
 ```
 
-4. **Install additional dependencies for example notebooks or development:**
+4. **Install additional dependencies:**
 
 ```bash
 # For running example notebooks
 pip install -e ".[notebooks]"
 
-# For development
+# For development and training
 pip install -e ".[train,dev]"
+
+# For running the Video API (see below)
+pip install -r requirements-api.txt
 ```
+
+### Installation for Video API Deployment
+
+If you're setting up the Video API for production deployment:
+
+```bash
+# Install SAM3 package
+pip install -e .
+
+# Install API dependencies
+pip install -r requirements-api.txt
+
+# Verify installation
+python -c "from sam3.model_builder import build_sam3_video_predictor; print('SAM3 ready!')"
+```
+
+See [README_DEPLOYMENT.md](README_DEPLOYMENT.md) for complete deployment guide to Google Cloud Run with GPU support.
 
 ## Getting Started
 
-⚠️ Before using SAM 3, please request access to the checkpoints on the SAM 3
+⚠️ **Important**: Before using SAM 3, please request access to the checkpoints on the SAM 3
 Hugging Face [repo](https://huggingface.co/facebook/sam3). Once accepted, you
 need to be authenticated to download the checkpoints. You can do this by running
-the following [steps](https://huggingface.co/docs/huggingface_hub/en/quick-start#authentication)
-(e.g. `hf auth login` after generating an access token.)
+the following [steps](https://huggingface.co/docs/huggingface_hub/en/quick-start#authentication):
+
+```bash
+# Install huggingface_hub if not already installed
+pip install huggingface_hub
+
+# Login with your access token
+huggingface-cli login
+# or
+python -c "from huggingface_hub import login; login()"
+```
 
 ### Basic Usage
 
@@ -342,6 +389,64 @@ We release 2 image benchmarks, [SA-Co/Gold](scripts/eval/gold/README.md) and
 
 ![SA-Co dataset](assets/sa_co_dataset.jpg?raw=true)
 
+## Video Segmentation API
+
+This repository includes a production-ready FastAPI backend for video segmentation. Deploy to Google Cloud Run with GPU support in minutes!
+
+### Quick Start (API)
+
+```bash
+# Run API locally
+python run_api.py
+
+# API will be available at http://localhost:8000
+# Docs: http://localhost:8000/docs
+```
+
+### Deploy to Cloud (with GPU)
+
+```bash
+# Quick deployment to Google Cloud Run
+./deploy_gpu.sh YOUR_PROJECT_ID
+
+# Get service URL
+gcloud run services describe sam3-api-service --region=europe-west4 --format='value(status.url)'
+```
+
+### API Usage Example
+
+```bash
+# Health check
+curl https://your-service-url.run.app/health
+
+# Segment dog from video
+curl -X POST "https://your-service-url.run.app/segment/dog" \
+  -F "video=@my_video.mp4" \
+  -F "background_mode=transparent" \
+  -F "output_format=webm"
+
+# Custom segmentation
+curl -X POST "https://your-service-url.run.app/segment" \
+  -F "video=@video.mp4" \
+  -F "prompt=cat" \
+  -F "background_mode=black"
+```
+
+### API Documentation
+
+- **[README_DEPLOYMENT.md](README_DEPLOYMENT.md)** - Complete deployment guide for Google Cloud Run
+- **[README_API.md](README_API.md)** - API endpoints and usage documentation
+- **[QUICKSTART.md](QUICKSTART.md)** - Quick deployment reference
+- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
+
+Features:
+- ✅ GPU-accelerated video processing (NVIDIA L4/A100)
+- ✅ Text-based object segmentation
+- ✅ Multiple background modes (transparent, black, white, blur)
+- ✅ Auto-scaling to zero (no cost when idle)
+- ✅ Production-ready monitoring and logging
+- ✅ Docker containerized deployment
+
 ## Development
 
 To set up the development environment:
@@ -354,6 +459,15 @@ To format the code:
 
 ```bash
 ufmt format .
+```
+
+### Environment Variables for API
+
+```bash
+# Optional: Configure API settings
+export PORT=8080                      # API port (default: 8080)
+export CUDA_VISIBLE_DEVICES=0         # GPU device ID
+export OMP_NUM_THREADS=4              # OpenMP threads
 ```
 
 ## Contributing

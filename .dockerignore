@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (exclude all .md except README.md which is needed by setup.py)
+*.md
+!README.md
+docs/
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Output directories
+outputs/
+output/
+temp/
+tmp/
+
+# Scripts (not needed in container)
+scripts/
+
+# Examples and assets (not needed for API)
+examples/
+assets/
+
+# Training related (not needed for API)
+train/
+
+# Evaluation related (not needed for API)
+eval/
+
+# GitHub
+.github/
+
+# Jupyter
+*.ipynb
+.ipynb_checkpoints/
+
+# Large model files (will be downloaded during Cloud Build)
+*.pt
+*.pth
+*.ckpt
+checkpoints/
+# weights/ - commented out because weights are downloaded by Cloud Build and needed in container
+
+# Logs
+*.log
+logs/
+
+# Deployment scripts
+deploy_*.sh
+cloudbuild.yaml
+.dockerignore
+Dockerfile*

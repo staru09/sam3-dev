@@ -4,23 +4,20 @@
 Video segmentation endpoints for SAM3 API.
 """
 
-from fastapi import APIRouter, File, Form, UploadFile
+import uuid
 
-from api.models.schemas import (
-    BackgroundMode,
-    OutputFormat,
-    VideoSegmentationResponse,
-)
-from api.handlers.video_processing import (
-    process_video_segmentation,
-    process_video_from_gcs,
-)
+from fastapi import APIRouter, File, Form, UploadFile
+from fastapi.responses import JSONResponse
+
+from api.core.task_store import task_store
+from api.core.worker import worker
+from api.models.schemas import BackgroundMode, OutputFormat
 
 
 router = APIRouter(prefix="/segment", tags=["Segmentation"])
 
 
-@router.post("/dog", response_model=VideoSegmentationResponse)
+@router.post("/dog")
 async def segment_dog_from_video(
     source_bucket: str = Form(..., description="GCS bucket name containing the input video"),
     video_uuid: str = Form(..., description="UUID of the input video in the source bucket"),
@@ -37,10 +34,6 @@ async def segment_dog_from_video(
         default=False,
         description="Include overlay visualization"
     ),
-    upload_to_gcs: bool = Form(
-        default=True,
-        description="Upload results to GCS bucket"
-    ),
     gcs_bucket: str = Form(
         default="nannie_sam3",
         description="GCS bucket name for output upload"
@@ -49,9 +42,8 @@ async def segment_dog_from_video(
     """
     Segment dogs from a video stored in GCS and remove the background.
     
-    This endpoint downloads a video from the specified GCS bucket, 
-    extracts dogs from the video, and uploads the output with a new UUID.
-    The input video is NOT saved - only the processed output is stored.
+    This endpoint returns immediately with a task_id. Use `/poll/{task_id}` 
+    to check processing status and get the result.
     
     **Parameters:**
     - **source_bucket**: GCS bucket containing the input video
@@ -64,29 +56,58 @@ async def segment_dog_from_video(
         - `blur`: Blurred version of the original background
     - **output_format**: Output video format (mp4, webm, mov)
     - **include_overlay**: Include a visualization video with colored mask overlay
-    - **upload_to_gcs**: Upload results to Google Cloud Storage
     - **gcs_bucket**: GCS bucket name for output (default: nannie_sam3)
     
     **Returns:**
-    - Processed video with only the dog(s) visible
-    - Optional overlay video for visualization
+    - **202 Accepted** with task_id for polling
+    
+    **Example Response:**
+    ```json
+    {
+        "task_id": "abc-123-def-456",
+        "status": "queued",
+        "message": "Video segmentation job queued",
+        "poll_url": "/poll/abc-123-def-456"
+    }
+    ```
     """
-    return await process_video_from_gcs(
-        source_bucket=source_bucket,
-        video_uuid=video_uuid,
-        video_blob_path=video_blob_path,
-        prompt="dog",
-        background_mode=background_mode,
-        output_format=output_format,
-        include_overlay=include_overlay,
-        upload_to_gcs=upload_to_gcs,
-        gcs_bucket=gcs_bucket,
+    # Generate unique task ID
+    task_id = str(uuid.uuid4())
+    
+    # Create task in store
+    task_store.create_task(task_id)
+    
+    # Enqueue job for background processing
+    worker.enqueue(
+        task_id=task_id,
+        job_params={
+            "source_bucket": source_bucket,
+            "video_uuid": video_uuid,
+            "video_blob_path": video_blob_path,
+            "prompt": "dog",
+            "background_mode": background_mode.value,
+            "include_overlay": include_overlay,
+            "gcs_bucket": gcs_bucket,
+        }
+    )
+    
+    # Return immediately with 202 Accepted
+    return JSONResponse(
+        status_code=202,
+        content={
+            "task_id": task_id,
+            "status": "queued",
+            "message": "Video segmentation job queued",
+            "poll_url": f"/poll/{task_id}"
+        }
     )
 
 
-@router.post("", response_model=VideoSegmentationResponse)
+@router.post("")
 async def segment_from_video(
-    video: UploadFile = File(..., description="Video file to process"),
+    source_bucket: str = Form(..., description="GCS bucket name containing the input video"),
+    video_uuid: str = Form(..., description="UUID of the input video in the source bucket"),
+    video_blob_path: str = Form(..., description="Path to video blob in bucket"),
     prompt: str = Form(
         default="dog",
         description="Text prompt describing what to segment"
@@ -103,10 +124,6 @@ async def segment_from_video(
         default=False,
         description="Include overlay visualization"
     ),
-    upload_to_gcs: bool = Form(
-        default=True,
-        description="Upload results to GCS bucket"
-    ),
     gcs_bucket: str = Form(
         default="nannie_sam3",
         description="GCS bucket name for upload"
@@ -115,27 +132,49 @@ async def segment_from_video(
     """
     Segment objects from a video using a custom text prompt.
     
-    Use this endpoint to extract any object you can describe with text.
-    For example: "dog", "cat", "person", "car", "bird", etc.
+    This endpoint returns immediately with a task_id. Use `/poll/{task_id}` 
+    to check processing status and get the result.
     
     **Parameters:**
-    - **video**: The input video file
+    - **source_bucket**: GCS bucket containing the input video
+    - **video_uuid**: UUID of the input video (for reference tracking)
+    - **video_blob_path**: Path to the video blob in the source bucket
     - **prompt**: Text describing what to segment (e.g., "dog", "person with red shirt")
     - **background_mode**: How to handle the background
     - **output_format**: Output video format
     - **include_overlay**: Include visualization video
-    - **upload_to_gcs**: Upload results to Google Cloud Storage
     - **gcs_bucket**: GCS bucket name (default: nannie_sam3)
     
     **Returns:**
-    - Processed video with only the specified object(s) visible
+    - **202 Accepted** with task_id for polling
     """
-    return await process_video_segmentation(
-        video=video,
-        prompt=prompt,
-        background_mode=background_mode,
-        output_format=output_format,
-        include_overlay=include_overlay,
-        upload_to_gcs=upload_to_gcs,
-        gcs_bucket=gcs_bucket,
+    # Generate unique task ID
+    task_id = str(uuid.uuid4())
+    
+    # Create task in store
+    task_store.create_task(task_id)
+    
+    # Enqueue job for background processing
+    worker.enqueue(
+        task_id=task_id,
+        job_params={
+            "source_bucket": source_bucket,
+            "video_uuid": video_uuid,
+            "video_blob_path": video_blob_path,
+            "prompt": prompt,
+            "background_mode": background_mode.value,
+            "include_overlay": include_overlay,
+            "gcs_bucket": gcs_bucket,
+        }
+    )
+    
+    # Return immediately with 202 Accepted
+    return JSONResponse(
+        status_code=202,
+        content={
+            "task_id": task_id,
+            "status": "queued",
+            "message": "Video segmentation job queued",
+            "poll_url": f"/poll/{task_id}"
+        }
     )
