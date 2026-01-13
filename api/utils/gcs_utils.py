@@ -7,7 +7,14 @@ Google Cloud Storage utilities for SAM3 API
 import os
 from typing import Optional
 
-from google.cloud import storage
+try:
+    from google.cloud import storage
+except ImportError:
+    raise ImportError(
+        "google-cloud-storage is not installed. "
+        "Please install it with: pip install google-cloud-storage\n"
+        "Or install all API requirements: pip install -r requirements-api.txt"
+    )
 
 
 def upload_to_gcs(

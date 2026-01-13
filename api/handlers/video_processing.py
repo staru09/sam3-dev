@@ -156,7 +156,25 @@ async def process_video_from_gcs_async(
     Process video from GCS bucket asynchronously with task tracking and automatic cleanup.
     This version is used for /segment/dog endpoint which queues tasks and cleans up after completion.
     """
-    from api.utils.gcs_utils import download_from_gcs, upload_to_gcs as gcs_upload
+    try:
+        from api.utils.gcs_utils import download_from_gcs, upload_to_gcs as gcs_upload
+    except ImportError as e:
+        error_msg = (
+            f"Failed to import Google Cloud Storage utilities: {e}\n"
+            "Please install google-cloud-storage:\n"
+            "  pip install google-cloud-storage\n"
+            "Or install all API requirements:\n"
+            "  pip install -r requirements-api.txt"
+        )
+        task_store[task_id] = {
+            "status": "failed",
+            "progress": 0.0,
+            "message": error_msg
+        }
+        raise HTTPException(
+            status_code=500,
+            detail=error_msg
+        )
     
     # Validate blob path extension
     file_ext = Path(video_blob_path).suffix.lower()
