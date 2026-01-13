@@ -130,22 +130,28 @@ except requests.RequestException as e:
 print(f"\nStep 2: Polling task progress...")
 print("-" * 60)
 
-max_poll_attempts = 120  # 10 minutes max (5 second intervals)
+max_poll_attempts = 240  # 20 minutes max (5 second intervals)
 poll_interval = 5  # seconds
+poll_timeout = 30  # Increased timeout for poll requests (server might be busy)
+consecutive_timeouts = 0
+max_consecutive_timeouts = 3  # Only show timeout warning after 3 consecutive failures
 
 for attempt in range(max_poll_attempts):
     try:
         poll_response = requests.get(
             f"{SERVICE_URL}/poll/{task_id}",
-            timeout=10
+            timeout=(5, poll_timeout)  # (connect timeout, read timeout)
         )
         
+        # Reset consecutive timeout counter on successful request
+        consecutive_timeouts = 0
+        
         if poll_response.status_code == 404:
-            print(f"❌ Error: Task {task_id} not found")
+            print(f"\n❌ Error: Task {task_id} not found")
             sys.exit(1)
         
         if poll_response.status_code != 200:
-            print(f"⚠️  Poll returned status {poll_response.status_code}")
+            print(f"\n⚠️  Poll returned status {poll_response.status_code}")
             time.sleep(poll_interval)
             continue
         
@@ -156,9 +162,10 @@ for attempt in range(max_poll_attempts):
         total_frames = poll_result.get('total_frames', 0)
         message = poll_result.get('message', '')
         
-        # Display progress
+        # Display progress (truncate long messages for display)
+        display_message = message[:50] + "..." if len(message) > 50 else message
         progress_bar = "█" * int(progress * 50) + "░" * (50 - int(progress * 50))
-        print(f"\r[{progress_bar}] {progress*100:.1f}% | Status: {status} | Frame: {current_frame}/{total_frames} | {message}", end="", flush=True)
+        print(f"\r[{progress_bar}] {progress*100:.1f}% | Status: {status} | Frame: {current_frame}/{total_frames} | {display_message}", end="", flush=True)
         
         if status == "completed":
             print("\n\n✅ Task completed successfully!")
@@ -205,8 +212,19 @@ for attempt in range(max_poll_attempts):
             print(f"\n⚠️  Unknown status: {status}")
             time.sleep(poll_interval)
     
+    except requests.Timeout as e:
+        consecutive_timeouts += 1
+        # Only show warning after multiple consecutive timeouts
+        if consecutive_timeouts >= max_consecutive_timeouts:
+            print(f"\n⚠️  Poll timeout (attempt {attempt + 1}/{max_poll_attempts}) - server may be busy processing. Retrying...")
+            consecutive_timeouts = 0  # Reset after warning
+        # Continue polling - timeouts are not fatal
+        time.sleep(poll_interval)
+        continue
     except requests.RequestException as e:
-        print(f"\n⚠️  Poll error: {e}")
+        # For other request errors, show warning but continue
+        if "Read timed out" not in str(e):  # Suppress read timeout messages (handled above)
+            print(f"\n⚠️  Poll error: {e}")
         time.sleep(poll_interval)
         continue
 

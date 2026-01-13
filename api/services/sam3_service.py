@@ -63,26 +63,37 @@ class Sam3VideoService:
             else:
                 raise RuntimeError("CUDA is required for SAM3")
             
-            # Download weights from HuggingFace (fallback to local if available)
+            # Priority: Use weights from GCS bucket (injected during Cloud Build)
+            # Fallback: HuggingFace (only if local weights not found)
             checkpoint_path = None
             
-            # Check if local weights exist (for container deployments)
+            # Check if local weights exist (injected from GCS bucket during Cloud Build)
+            # Cloud Build downloads weights from gs://nannie_sam3/sam3/ to ./weights/
+            # Dockerfile copies them to /app/weights/
             local_weights_path = "/app/weights/sam3.pt"
+            
             if os.path.exists(local_weights_path):
                 checkpoint_path = local_weights_path
-                print(f"Loading SAM3 model from local weights: {checkpoint_path}")
+                print(f"✅ Loading SAM3 model from GCS bucket weights: {checkpoint_path}")
+                print("   (Weights were injected from GCS bucket during Cloud Build)")
             else:
-                print("Local weights not found. Downloading from HuggingFace...")
-                print("Note: Ensure HuggingFace authentication is set up (hf auth login)")
+                # Fallback to HuggingFace only if weights not found in container
+                print("⚠️  Local weights not found at /app/weights/sam3.pt")
+                print("   Attempting to download from HuggingFace as fallback...")
+                print("   Note: For Cloud Run deployment, weights should be injected from GCS bucket.")
+                print("   Check cloudbuild.yaml Step 1 to ensure weights are downloaded from GCS.")
                 try:
                     from sam3.model_builder import download_ckpt_from_hf
                     checkpoint_path = download_ckpt_from_hf()
-                    print(f"Downloaded checkpoint from HuggingFace: {checkpoint_path}")
+                    print(f"⚠️  Downloaded checkpoint from HuggingFace: {checkpoint_path}")
+                    print("   (This is a fallback - prefer using GCS bucket weights for production)")
                 except Exception as e:
-                    print(f"Error downloading from HuggingFace: {e}")
+                    print(f"❌ Error downloading from HuggingFace: {e}")
                     raise RuntimeError(
-                        f"Failed to download weights from HuggingFace: {e}. "
-                        "Please ensure HuggingFace authentication is set up (hf auth login)."
+                        f"Failed to load model weights. "
+                        f"Local weights not found at {local_weights_path} and HuggingFace download failed: {e}. "
+                        "For Cloud Run deployment, ensure weights are downloaded from GCS bucket in cloudbuild.yaml. "
+                        "For local development, ensure HuggingFace authentication is set up (hf auth login)."
                     )
             
             print(f"Using GPUs: {gpus_to_use}")
