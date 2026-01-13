@@ -17,8 +17,7 @@ from api.core.lifespan import lifespan
 from api.routers import (
     health_router,
     segmentation_router,
-    download_router,
-    tasks_router,
+    poll_router,
 )
 
 
@@ -55,8 +54,7 @@ app.mount("/outputs", StaticFiles(directory=str(OUTPUT_DIR)), name="outputs")
 # Include routers
 app.include_router(health_router)
 app.include_router(segmentation_router)
-app.include_router(download_router)
-app.include_router(tasks_router)
+app.include_router(poll_router)
 
 
 if __name__ == "__main__":

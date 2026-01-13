@@ -5,13 +5,14 @@ Video processing handlers for SAM3 API.
 Contains the core business logic for video segmentation.
 """
 
+import asyncio
 import shutil
 import uuid
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
-from api.core.config import OUTPUT_DIR, ALLOWED_VIDEO_EXTENSIONS
+from api.core.config import OUTPUT_DIR, ALLOWED_VIDEO_EXTENSIONS, task_store
 from api.models.schemas import BackgroundMode, OutputFormat, VideoSegmentationResponse
 from api.services.sam3_service import sam3_service
 
@@ -133,6 +134,213 @@ async def process_video_segmentation(
     except Exception as e:
         # Cleanup on error
         shutil.rmtree(task_output_dir, ignore_errors=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing video: {str(e)}"
+        )
+
+
+async def process_video_from_gcs_async(
+    source_bucket: str,
+    video_uuid: str,
+    video_blob_path: str,
+    prompt: str,
+    background_mode: BackgroundMode,
+    output_format: OutputFormat,
+    include_overlay: bool,
+    upload_to_gcs: bool = True,
+    gcs_bucket: str = "nannie_sam3",
+    task_id: str = None,
+) -> VideoSegmentationResponse:
+    """
+    Process video from GCS bucket asynchronously with task tracking and automatic cleanup.
+    This version is used for /segment/dog endpoint which queues tasks and cleans up after completion.
+    """
+    from api.utils.gcs_utils import download_from_gcs, upload_to_gcs as gcs_upload
+    
+    # Validate blob path extension
+    file_ext = Path(video_blob_path).suffix.lower()
+    if file_ext not in ALLOWED_VIDEO_EXTENSIONS:
+        task_store[task_id] = {
+            "status": "failed",
+            "progress": 0.0,
+            "message": f"Invalid file type. Allowed: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}"
+        }
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Allowed: {', '.join(ALLOWED_VIDEO_EXTENSIONS)}"
+        )
+    
+    # Ensure model is loaded
+    if not sam3_service.is_loaded:
+        try:
+            sam3_service.load_model()
+        except Exception as e:
+            task_store[task_id] = {
+                "status": "failed",
+                "progress": 0.0,
+                "message": f"Failed to load SAM3 model: {str(e)}"
+            }
+            raise HTTPException(
+                status_code=503,
+                detail=f"Failed to load SAM3 model: {str(e)}"
+            )
+    
+    # Update task status
+    task_store[task_id] = {
+        "status": "processing",
+        "progress": 0.0,
+        "current_frame": 0,
+        "total_frames": 0,
+        "message": "Downloading video from GCS..."
+    }
+    
+    # Generate NEW unique task ID for output (different from input video_uuid)
+    output_task_id = task_id
+    task_output_dir = OUTPUT_DIR / output_task_id
+    task_output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create temp directory for input video (will be cleaned up after processing)
+    temp_input_dir = task_output_dir / "temp_input"
+    temp_input_dir.mkdir(parents=True, exist_ok=True)
+    input_video_path = temp_input_dir / f"input{file_ext}"
+    
+    try:
+        # Download video from GCS
+        print(f"Downloading video from gs://{source_bucket}/{video_blob_path}")
+        download_from_gcs(
+            bucket_name=source_bucket,
+            source_blob_name=video_blob_path,
+            destination_path=str(input_video_path)
+        )
+        print(f"Video downloaded to {input_video_path}")
+        
+        # Update progress
+        task_store[task_id]["progress"] = 0.1
+        task_store[task_id]["message"] = "Processing video..."
+        
+    except Exception as e:
+        shutil.rmtree(task_output_dir, ignore_errors=True)
+        task_store[task_id] = {
+            "status": "failed",
+            "progress": 0.0,
+            "message": f"Failed to download video from GCS: {str(e)}"
+        }
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to download video from GCS: {str(e)}"
+        )
+    
+    try:
+        # Process video with progress callback
+        def progress_callback(message, progress, current_frame, total_frames):
+            task_store[task_id].update({
+                "status": "processing",
+                "progress": progress,
+                "current_frame": current_frame,
+                "total_frames": total_frames,
+                "message": message
+            })
+        
+        result = sam3_service.segment_video(
+            video_path=str(input_video_path),
+            prompt=prompt,
+            background_mode=background_mode.value,
+            output_dir=str(task_output_dir),
+            include_overlay=include_overlay,
+            progress_callback=progress_callback,
+        )
+        
+        # Clean up temp input directory (we don't save input video)
+        shutil.rmtree(temp_input_dir, ignore_errors=True)
+        
+        # Build response
+        output_video_path = None
+        overlay_video_path = None
+        gcs_urls = []
+        
+        task_store[task_id]["progress"] = 0.9
+        task_store[task_id]["message"] = "Uploading to GCS..."
+        
+        if result["output_video_path"]:
+            output_video_path = f"/outputs/{output_task_id}/{Path(result['output_video_path']).name}"
+            
+            # Upload to GCS if requested
+            if upload_to_gcs:
+                try:
+                    gcs_url = gcs_upload(
+                        local_path=result["output_video_path"],
+                        bucket_name=gcs_bucket,
+                        destination_blob_name=f"outputs/{output_task_id}/{Path(result['output_video_path']).name}"
+                    )
+                    gcs_urls.append(gcs_url)
+                    print(f"Uploaded to GCS: {gcs_url}")
+                except Exception as e:
+                    print(f"Warning: Failed to upload to GCS: {e}")
+        
+        if result["overlay_video_path"]:
+            overlay_video_path = f"/outputs/{output_task_id}/{Path(result['overlay_video_path']).name}"
+            
+            # Upload overlay to GCS if requested
+            if upload_to_gcs:
+                try:
+                    gcs_url = gcs_upload(
+                        local_path=result["overlay_video_path"],
+                        bucket_name=gcs_bucket,
+                        destination_blob_name=f"outputs/{output_task_id}/{Path(result['overlay_video_path']).name}"
+                    )
+                    gcs_urls.append(gcs_url)
+                    print(f"Uploaded overlay to GCS: {gcs_url}")
+                except Exception as e:
+                    print(f"Warning: Failed to upload overlay to GCS: {e}")
+        
+        response_message = result["message"]
+        response_message += f" Input UUID: {video_uuid}, Output UUID: {output_task_id}"
+        if gcs_urls:
+            response_message += f" GCS URLs: {', '.join(gcs_urls)}"
+        
+        # Update task as completed
+        task_store[task_id] = {
+            "status": "completed",
+            "progress": 1.0,
+            "current_frame": result["total_frames"],
+            "total_frames": result["total_frames"],
+            "message": response_message,
+            "result": {
+                "success": result["success"],
+                "output_video_path": output_video_path,
+                "overlay_video_path": overlay_video_path,
+                "objects_detected": result["objects_detected"],
+                "processing_time_seconds": result["processing_time_seconds"],
+            }
+        }
+        
+        # Cleanup local files after successful processing and GCS upload
+        try:
+            shutil.rmtree(task_output_dir, ignore_errors=True)
+            print(f"Cleaned up local files for task {task_id}")
+        except Exception as e:
+            print(f"Warning: Failed to cleanup local files: {e}")
+        
+        return VideoSegmentationResponse(
+            success=result["success"],
+            message=response_message,
+            task_id=task_id,
+            output_video_path=output_video_path,
+            overlay_video_path=overlay_video_path,
+            total_frames=result["total_frames"],
+            objects_detected=result["objects_detected"],
+            processing_time_seconds=result["processing_time_seconds"],
+        )
+        
+    except Exception as e:
+        # Cleanup on error
+        shutil.rmtree(task_output_dir, ignore_errors=True)
+        task_store[task_id] = {
+            "status": "failed",
+            "progress": 0.0,
+            "message": f"Error processing video: {str(e)}"
+        }
         raise HTTPException(
             status_code=500,
             detail=f"Error processing video: {str(e)}"

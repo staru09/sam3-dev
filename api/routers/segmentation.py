@@ -4,8 +4,12 @@
 Video segmentation endpoints for SAM3 API.
 """
 
+import asyncio
+import uuid
+
 from fastapi import APIRouter, File, Form, UploadFile
 
+from api.core.config import task_store
 from api.models.schemas import (
     BackgroundMode,
     OutputFormat,
@@ -14,6 +18,7 @@ from api.models.schemas import (
 from api.handlers.video_processing import (
     process_video_segmentation,
     process_video_from_gcs,
+    process_video_from_gcs_async,
 )
 
 
@@ -49,9 +54,9 @@ async def segment_dog_from_video(
     """
     Segment dogs from a video stored in GCS and remove the background.
     
-    This endpoint downloads a video from the specified GCS bucket, 
-    extracts dogs from the video, and uploads the output with a new UUID.
-    The input video is NOT saved - only the processed output is stored.
+    This endpoint queues the task and returns immediately with a task_id.
+    Use the /poll/{task_id} endpoint to check progress.
+    The task will automatically cleanup local files after processing and GCS upload.
     
     **Parameters:**
     - **source_bucket**: GCS bucket containing the input video
@@ -68,19 +73,57 @@ async def segment_dog_from_video(
     - **gcs_bucket**: GCS bucket name for output (default: nannie_sam3)
     
     **Returns:**
-    - Processed video with only the dog(s) visible
-    - Optional overlay video for visualization
+    - Immediate response with task_id (status: "queued")
+    - Use /poll/{task_id} to check progress and get results
+    - Local files are automatically cleaned up after processing
     """
-    return await process_video_from_gcs(
-        source_bucket=source_bucket,
-        video_uuid=video_uuid,
-        video_blob_path=video_blob_path,
-        prompt="dog",
-        background_mode=background_mode,
-        output_format=output_format,
-        include_overlay=include_overlay,
-        upload_to_gcs=upload_to_gcs,
-        gcs_bucket=gcs_bucket,
+    # Generate task ID
+    task_id = str(uuid.uuid4())
+    
+    # Initialize task in store
+    task_store[task_id] = {
+        "status": "queued",
+        "progress": 0.0,
+        "current_frame": 0,
+        "total_frames": 0,
+        "message": "Task queued"
+    }
+    
+    # Queue background task
+    async def run_processing():
+        try:
+            await process_video_from_gcs_async(
+                source_bucket=source_bucket,
+                video_uuid=video_uuid,
+                video_blob_path=video_blob_path,
+                prompt="dog",
+                background_mode=background_mode,
+                output_format=output_format,
+                include_overlay=include_overlay,
+                upload_to_gcs=upload_to_gcs,
+                gcs_bucket=gcs_bucket,
+                task_id=task_id,
+            )
+        except Exception as e:
+            task_store[task_id] = {
+                "status": "failed",
+                "progress": 0.0,
+                "message": f"Error in background processing: {str(e)}"
+            }
+    
+    # Use asyncio.create_task for async background processing
+    asyncio.create_task(run_processing())
+    
+    # Return immediately with task_id
+    return VideoSegmentationResponse(
+        success=True,
+        message="Task queued successfully",
+        task_id=task_id,
+        output_video_path=None,
+        overlay_video_path=None,
+        total_frames=0,
+        objects_detected=0,
+        processing_time_seconds=0.0,
     )
 
 

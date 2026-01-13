@@ -63,15 +63,28 @@ class Sam3VideoService:
             else:
                 raise RuntimeError("CUDA is required for SAM3")
             
-            # Use local weights from container (downloaded from GCS during build)
-            checkpoint_path = "/app/weights/sam3.pt"
-            if not os.path.exists(checkpoint_path):
-                raise FileNotFoundError(
-                    f"Model weights not found at {checkpoint_path}. "
-                    "Weights should be downloaded from GCS during container build."
-                )
+            # Download weights from HuggingFace (fallback to local if available)
+            checkpoint_path = None
             
-            print(f"Loading SAM3 model from: {checkpoint_path}")
+            # Check if local weights exist (for container deployments)
+            local_weights_path = "/app/weights/sam3.pt"
+            if os.path.exists(local_weights_path):
+                checkpoint_path = local_weights_path
+                print(f"Loading SAM3 model from local weights: {checkpoint_path}")
+            else:
+                print("Local weights not found. Downloading from HuggingFace...")
+                print("Note: Ensure HuggingFace authentication is set up (hf auth login)")
+                try:
+                    from sam3.model_builder import download_ckpt_from_hf
+                    checkpoint_path = download_ckpt_from_hf()
+                    print(f"Downloaded checkpoint from HuggingFace: {checkpoint_path}")
+                except Exception as e:
+                    print(f"Error downloading from HuggingFace: {e}")
+                    raise RuntimeError(
+                        f"Failed to download weights from HuggingFace: {e}. "
+                        "Please ensure HuggingFace authentication is set up (hf auth login)."
+                    )
+            
             print(f"Using GPUs: {gpus_to_use}")
             self._predictor = build_sam3_video_predictor(
                 checkpoint_path=checkpoint_path,

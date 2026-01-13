@@ -49,6 +49,7 @@ class VideoSegmentationResponse(BaseModel):
     """Response model for video segmentation"""
     success: bool
     message: str
+    task_id: Optional[str] = None  # Task ID for async processing
     output_video_path: Optional[str] = None
     overlay_video_path: Optional[str] = None
     total_frames: int = 0
