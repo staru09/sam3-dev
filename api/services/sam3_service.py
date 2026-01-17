@@ -182,167 +182,171 @@ class Sam3VideoService:
             if progress_callback:
                 progress_callback("Starting SAM3 session...", 0.05, 0, total_frames)
             
-            # Start SAM3 session
-            response = self._predictor.handle_request(
-                request=dict(
-                    type="start_session",
-                    resource_path=temp_frames_dir,
-                )
-            )
-            session_id = response["session_id"]
-            
-            try:
-                # Add text prompt on first frame
-                if progress_callback:
-                    progress_callback(f"Adding prompt: '{prompt}'...", 0.1, 0, total_frames)
-                
+            # Use autocast context for SAM3 predictor calls
+            # This is required when running in a thread executor (asyncio.run_in_executor)
+            # because autocast context doesn't propagate to new threads
+            with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                # Start SAM3 session
                 response = self._predictor.handle_request(
                     request=dict(
-                        type="add_prompt",
-                        session_id=session_id,
-                        frame_index=0,
-                        text=prompt,
+                        type="start_session",
+                        resource_path=temp_frames_dir,
                     )
                 )
+                session_id = response["session_id"]
+            
+                try:
+                    # Add text prompt on first frame
+                    if progress_callback:
+                        progress_callback(f"Adding prompt: '{prompt}'...", 0.1, 0, total_frames)
+                    
+                    response = self._predictor.handle_request(
+                        request=dict(
+                            type="add_prompt",
+                            session_id=session_id,
+                            frame_index=0,
+                            text=prompt,
+                        )
+                    )
+                    
+                    initial_output = response["outputs"]
+                    objects_detected = len(initial_output.get("out_obj_ids", []))
+                    
+                    if objects_detected == 0:
+                        return {
+                            "success": False,
+                            "message": f"No objects matching '{prompt}' detected in the video",
+                            "output_video_path": None,
+                            "overlay_video_path": None,
+                            "total_frames": total_frames,
+                            "objects_detected": 0,
+                            "processing_time_seconds": time.time() - start_time,
+                        }
+                    
+                    # Propagate through video
+                    if progress_callback:
+                        progress_callback("Propagating segmentation...", 0.15, 0, total_frames)
+                    
+                    outputs_per_frame = {}
+                    for response in self._predictor.handle_stream_request(
+                        request=dict(
+                            type="propagate_in_video",
+                            session_id=session_id,
+                        )
+                    ):
+                        frame_idx = response["frame_index"]
+                        outputs_per_frame[frame_idx] = response["outputs"]
+                        
+                        if progress_callback:
+                            progress = 0.15 + (0.6 * (frame_idx + 1) / total_frames)
+                            progress_callback(
+                                f"Processing frame {frame_idx + 1}/{total_frames}",
+                                progress,
+                                frame_idx + 1,
+                                total_frames
+                            )
                 
-                initial_output = response["outputs"]
-                objects_detected = len(initial_output.get("out_obj_ids", []))
-                
-                if objects_detected == 0:
+                    # Process frames with masks
+                    if progress_callback:
+                        progress_callback("Applying masks to frames...", 0.75, 0, total_frames)
+                    
+                    processed_frames = []
+                    overlay_frames = []
+                    
+                    # Load original video frames
+                    video_frames, _ = load_video_frames(video_path)
+                    
+                    for frame_idx in sorted(outputs_per_frame.keys()):
+                        frame = video_frames[frame_idx]
+                        output = outputs_per_frame[frame_idx]
+                        
+                        # Get all masks for this frame
+                        masks = output.get("out_binary_masks", [])
+                        
+                        if len(masks) > 0:
+                            # Combine all detected object masks
+                            combined_mask = combine_masks(list(masks))
+                            
+                            # Apply mask to remove background
+                            processed_frame = apply_mask_to_frame(
+                                frame, combined_mask, background_mode
+                            )
+                            processed_frames.append(processed_frame)
+                            
+                            # Create overlay version if requested
+                            if include_overlay:
+                                overlay = self._create_overlay_frame(
+                                    frame, masks, output.get("out_obj_ids", [])
+                                )
+                                overlay_frames.append(overlay)
+                        else:
+                            # No mask for this frame, use transparent/background
+                            if background_mode == "transparent":
+                                alpha = np.zeros((*frame.shape[:2], 1), dtype=np.uint8)
+                                processed_frames.append(np.dstack([frame, alpha]))
+                            else:
+                                bg_frame = apply_mask_to_frame(
+                                    frame,
+                                    np.zeros(frame.shape[:2], dtype=np.uint8),
+                                    background_mode
+                                )
+                                processed_frames.append(bg_frame)
+                            
+                            if include_overlay:
+                                overlay_frames.append(frame)
+                        
+                        if progress_callback:
+                            progress = 0.75 + (0.2 * (frame_idx + 1) / total_frames)
+                            progress_callback(
+                                f"Applying mask to frame {frame_idx + 1}/{total_frames}",
+                                progress,
+                                frame_idx + 1,
+                                total_frames
+                            )
+                    
+                    # Create output video
+                    if progress_callback:
+                        progress_callback("Creating output video...", 0.95, total_frames, total_frames)
+                    
+                    has_alpha = background_mode == "transparent"
+                    output_ext = ".webm" if has_alpha else ".mp4"
+                    output_video_path = os.path.join(output_dir, f"segmented{output_ext}")
+                    
+                    if has_alpha:
+                        create_video_with_alpha(processed_frames, output_video_path, fps)
+                    else:
+                        create_video_from_frames(processed_frames, output_video_path, fps)
+                    
+                    # Create overlay video if requested
+                    overlay_video_path = None
+                    if include_overlay and overlay_frames:
+                        overlay_video_path = os.path.join(output_dir, "overlay.mp4")
+                        create_video_from_frames(overlay_frames, overlay_video_path, fps)
+                    
+                    if progress_callback:
+                        progress_callback("Complete!", 1.0, total_frames, total_frames)
+                    
                     return {
-                        "success": False,
-                        "message": f"No objects matching '{prompt}' detected in the video",
-                        "output_video_path": None,
-                        "overlay_video_path": None,
+                        "success": True,
+                        "message": f"Successfully segmented {objects_detected} object(s) matching '{prompt}'",
+                        "output_video_path": output_video_path,
+                        "overlay_video_path": overlay_video_path,
                         "total_frames": total_frames,
-                        "objects_detected": 0,
+                        "objects_detected": objects_detected,
                         "processing_time_seconds": time.time() - start_time,
                     }
-                
-                # Propagate through video
-                if progress_callback:
-                    progress_callback("Propagating segmentation...", 0.15, 0, total_frames)
-                
-                outputs_per_frame = {}
-                for response in self._predictor.handle_stream_request(
-                    request=dict(
-                        type="propagate_in_video",
-                        session_id=session_id,
+                    
+                finally:
+                    # Close session (still inside autocast context)
+                    self._predictor.handle_request(
+                        request=dict(
+                            type="close_session",
+                            session_id=session_id,
+                        )
                     )
-                ):
-                    frame_idx = response["frame_index"]
-                    outputs_per_frame[frame_idx] = response["outputs"]
-                    
-                    if progress_callback:
-                        progress = 0.15 + (0.6 * (frame_idx + 1) / total_frames)
-                        progress_callback(
-                            f"Processing frame {frame_idx + 1}/{total_frames}",
-                            progress,
-                            frame_idx + 1,
-                            total_frames
-                        )
-                
-                # Process frames with masks
-                if progress_callback:
-                    progress_callback("Applying masks to frames...", 0.75, 0, total_frames)
-                
-                processed_frames = []
-                overlay_frames = []
-                
-                # Load original video frames
-                video_frames, _ = load_video_frames(video_path)
-                
-                for frame_idx in sorted(outputs_per_frame.keys()):
-                    frame = video_frames[frame_idx]
-                    output = outputs_per_frame[frame_idx]
-                    
-                    # Get all masks for this frame
-                    masks = output.get("out_binary_masks", [])
-                    
-                    if len(masks) > 0:
-                        # Combine all detected object masks
-                        combined_mask = combine_masks(list(masks))
-                        
-                        # Apply mask to remove background
-                        processed_frame = apply_mask_to_frame(
-                            frame, combined_mask, background_mode
-                        )
-                        processed_frames.append(processed_frame)
-                        
-                        # Create overlay version if requested
-                        if include_overlay:
-                            overlay = self._create_overlay_frame(
-                                frame, masks, output.get("out_obj_ids", [])
-                            )
-                            overlay_frames.append(overlay)
-                    else:
-                        # No mask for this frame, use transparent/background
-                        if background_mode == "transparent":
-                            alpha = np.zeros((*frame.shape[:2], 1), dtype=np.uint8)
-                            processed_frames.append(np.dstack([frame, alpha]))
-                        else:
-                            bg_frame = apply_mask_to_frame(
-                                frame,
-                                np.zeros(frame.shape[:2], dtype=np.uint8),
-                                background_mode
-                            )
-                            processed_frames.append(bg_frame)
-                        
-                        if include_overlay:
-                            overlay_frames.append(frame)
-                    
-                    if progress_callback:
-                        progress = 0.75 + (0.2 * (frame_idx + 1) / total_frames)
-                        progress_callback(
-                            f"Applying mask to frame {frame_idx + 1}/{total_frames}",
-                            progress,
-                            frame_idx + 1,
-                            total_frames
-                        )
-                
-                # Create output video
-                if progress_callback:
-                    progress_callback("Creating output video...", 0.95, total_frames, total_frames)
-                
-                has_alpha = background_mode == "transparent"
-                output_ext = ".webm" if has_alpha else ".mp4"
-                output_video_path = os.path.join(output_dir, f"segmented{output_ext}")
-                
-                if has_alpha:
-                    create_video_with_alpha(processed_frames, output_video_path, fps)
-                else:
-                    create_video_from_frames(processed_frames, output_video_path, fps)
-                
-                # Create overlay video if requested
-                overlay_video_path = None
-                if include_overlay and overlay_frames:
-                    overlay_video_path = os.path.join(output_dir, "overlay.mp4")
-                    create_video_from_frames(overlay_frames, overlay_video_path, fps)
-                
-                if progress_callback:
-                    progress_callback("Complete!", 1.0, total_frames, total_frames)
-                
-                return {
-                    "success": True,
-                    "message": f"Successfully segmented {objects_detected} object(s) matching '{prompt}'",
-                    "output_video_path": output_video_path,
-                    "overlay_video_path": overlay_video_path,
-                    "total_frames": total_frames,
-                    "objects_detected": objects_detected,
-                    "processing_time_seconds": time.time() - start_time,
-                }
-                
-            finally:
-                # Close session
-                self._predictor.handle_request(
-                    request=dict(
-                        type="close_session",
-                        session_id=session_id,
-                    )
-                )
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+                    gc.collect()
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
         
         finally:
             # Cleanup temp frames directory
