@@ -5,6 +5,7 @@ Video processing handlers for SAM3 API.
 Contains the core business logic for video segmentation.
 """
 
+import functools
 import asyncio
 import shutil
 import uuid
@@ -265,13 +266,20 @@ async def process_video_from_gcs_async(
                 "message": message
             })
         
-        result = sam3_service.segment_video(
-            video_path=str(input_video_path),
-            prompt=prompt,
-            background_mode=background_mode.value,
-            output_dir=str(task_output_dir),
-            include_overlay=include_overlay,
-            progress_callback=progress_callback,
+        # Run blocking segmentation in a thread to avoid blocking the event loop
+        # We use functools.partial to pass keyword arguments cleanly
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,  # Use default executor
+            functools.partial(
+                sam3_service.segment_video,
+                video_path=str(input_video_path),
+                prompt=prompt,
+                background_mode=background_mode.value,
+                output_dir=str(task_output_dir),
+                include_overlay=include_overlay,
+                progress_callback=progress_callback,
+            )
         )
         
         # Clean up temp input directory (we don't save input video)
