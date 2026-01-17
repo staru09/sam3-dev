@@ -12,7 +12,7 @@ from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
 
-from api.core.config import OUTPUT_DIR, ALLOWED_VIDEO_EXTENSIONS, task_store
+from api.core.config import OUTPUT_DIR, PROCESSED_VIDEOS_DIR, ALLOWED_VIDEO_EXTENSIONS, task_store
 from api.models.schemas import BackgroundMode, OutputFormat, VideoSegmentationResponse
 from api.services.sam3_service import sam3_service
 
@@ -84,16 +84,21 @@ async def process_video_segmentation(
         gcs_urls = []
         
         if result["output_video_path"]:
-            output_video_path = f"/outputs/{task_id}/{Path(result['output_video_path']).name}"
+            # Move to final destination
+            PROCESSED_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+            final_output_path = PROCESSED_VIDEOS_DIR / f"{task_id}.mp4"
+            shutil.move(result["output_video_path"], final_output_path)
+            
+            output_video_path = f"/datacam_videos/processed_videos/{task_id}.mp4"
             
             # Upload to GCS if requested
             if upload_to_gcs:
                 try:
                     from api.utils.gcs_utils import upload_to_gcs as gcs_upload
                     gcs_url = gcs_upload(
-                        local_path=result["output_video_path"],
+                        local_path=str(final_output_path),
                         bucket_name=gcs_bucket,
-                        destination_blob_name=f"outputs/{task_id}/{Path(result['output_video_path']).name}"
+                        destination_blob_name=f"outputs/{task_id}/{task_id}.mp4"
                     )
                     gcs_urls.append(gcs_url)
                     print(f"Uploaded to GCS: {gcs_url}")
@@ -281,15 +286,20 @@ async def process_video_from_gcs_async(
         task_store[task_id]["message"] = "Uploading to GCS..."
         
         if result["output_video_path"]:
-            output_video_path = f"/outputs/{output_task_id}/{Path(result['output_video_path']).name}"
+            # Move to final destination
+            PROCESSED_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+            final_output_path = PROCESSED_VIDEOS_DIR / f"{output_task_id}.mp4"
+            shutil.move(result["output_video_path"], final_output_path)
+            
+            output_video_path = f"/datacam_videos/processed_videos/{output_task_id}.mp4"
             
             # Upload to GCS if requested
             if upload_to_gcs:
                 try:
                     gcs_url = gcs_upload(
-                        local_path=result["output_video_path"],
+                        local_path=str(final_output_path),
                         bucket_name=gcs_bucket,
-                        destination_blob_name=f"outputs/{output_task_id}/{Path(result['output_video_path']).name}"
+                        destination_blob_name=f"outputs/{output_task_id}/{output_task_id}.mp4"
                     )
                     gcs_urls.append(gcs_url)
                     print(f"Uploaded to GCS: {gcs_url}")
@@ -458,15 +468,20 @@ async def process_video_from_gcs(
         gcs_urls = []
         
         if result["output_video_path"]:
-            output_video_path = f"/outputs/{output_task_id}/{Path(result['output_video_path']).name}"
+            # Move to final destination
+            PROCESSED_VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+            final_output_path = PROCESSED_VIDEOS_DIR / f"{output_task_id}.mp4"
+            shutil.move(result["output_video_path"], final_output_path)
+            
+            output_video_path = f"/datacam_videos/processed_videos/{output_task_id}.mp4"
             
             # Upload to GCS if requested
             if upload_to_gcs:
                 try:
                     gcs_url = gcs_upload(
-                        local_path=result["output_video_path"],
+                        local_path=str(final_output_path),
                         bucket_name=gcs_bucket,
-                        destination_blob_name=f"outputs/{output_task_id}/{Path(result['output_video_path']).name}"
+                        destination_blob_name=f"outputs/{output_task_id}/{output_task_id}.mp4"
                     )
                     gcs_urls.append(gcs_url)
                     print(f"Uploaded to GCS: {gcs_url}")

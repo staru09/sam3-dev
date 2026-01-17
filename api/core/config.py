@@ -9,6 +9,7 @@ from pathlib import Path
 
 # Output directory for processed videos
 OUTPUT_DIR = Path("outputs")
+PROCESSED_VIDEOS_DIR = Path("datacam_videos/processed_videos")
 
 # Store for tracking async tasks
 task_store: dict = {}
