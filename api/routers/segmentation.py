@@ -46,9 +46,9 @@ async def segment_dog_from_video(
         default=True,
         description="Upload results to GCS bucket"
     ),
-    gcs_bucket: str = Form(
-        default="nannie_sam3",
-        description="GCS bucket name for output upload"
+    gcs_output_path: str = Form(
+        default="datacam_videos/processed_videos",
+        description="GCS output path in format 'bucket/folder' (default: datacam_videos/processed_videos)"
     ),
 ):
     """
@@ -70,7 +70,7 @@ async def segment_dog_from_video(
     - **output_format**: Output video format (mp4, webm, mov)
     - **include_overlay**: Include a visualization video with colored mask overlay
     - **upload_to_gcs**: Upload results to Google Cloud Storage
-    - **gcs_bucket**: GCS bucket name for output (default: nannie_sam3)
+    - **gcs_output_path**: Output path in format 'bucket/folder' (default: datacam_videos/processed_videos)
     
     **Returns:**
     - Immediate response with task_id (status: "queued")
@@ -101,7 +101,7 @@ async def segment_dog_from_video(
                 output_format=output_format,
                 include_overlay=include_overlay,
                 upload_to_gcs=upload_to_gcs,
-                gcs_bucket=gcs_bucket,
+                gcs_output_path=gcs_output_path,
                 task_id=task_id,
             )
         except Exception as e:
@@ -150,9 +150,9 @@ async def segment_from_video(
         default=True,
         description="Upload results to GCS bucket"
     ),
-    gcs_bucket: str = Form(
-        default="nannie_sam3",
-        description="GCS bucket name for upload"
+    gcs_output_path: str = Form(
+        default="datacam_videos/processed_videos",
+        description="GCS output path in format 'bucket/folder'"
     ),
 ):
     """
@@ -168,7 +168,7 @@ async def segment_from_video(
     - **output_format**: Output video format
     - **include_overlay**: Include visualization video
     - **upload_to_gcs**: Upload results to Google Cloud Storage
-    - **gcs_bucket**: GCS bucket name (default: nannie_sam3)
+    - **gcs_output_path**: Output path in format 'bucket/folder' (default: datacam_videos/processed_videos)
     
     **Returns:**
     - Processed video with only the specified object(s) visible
@@ -180,5 +180,5 @@ async def segment_from_video(
         output_format=output_format,
         include_overlay=include_overlay,
         upload_to_gcs=upload_to_gcs,
-        gcs_bucket=gcs_bucket,
+        gcs_output_path=gcs_output_path,
     )

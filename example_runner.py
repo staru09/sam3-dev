@@ -1,24 +1,25 @@
 import requests
 import time
 import sys
+import os
+import shutil
 
-# ============================================================================
-# Configuration
-# ============================================================================
-# Cloud service URL (or localhost for local testing)
-SERVICE_URL = "http://localhost:8000"  # Change to cloud URL if needed: "https://sam3-api-service-g6gkfu4ava-ez.a.run.app"
 
-# GCS Configuration for /segment/dog endpoint
-# Test video configuration for local testing
+SERVICE_URL = "https://sam3-api-service-405737646974.europe-west4.run.app"
+
 video_url = "https://storage.cloud.google.com/datacam_videos/raw_videos/005d0bf7-446c-4a06-867d-5b41e0aa468c.mkv"
 video_id = "005d0bf7-446c-4a06-867d-5b41e0aa468c"
 
-# Extract bucket and blob path from video URL
-# URL format: https://storage.cloud.google.com/{bucket}/{blob_path}
+
 SOURCE_BUCKET = "datacam_videos"  # GCS bucket containing the input video
 VIDEO_UUID = video_id  # UUID of the input video
 VIDEO_BLOB_PATH = "raw_videos/005d0bf7-446c-4a06-867d-5b41e0aa468c.mkv"  # Path to video blob in source bucket
-GCS_BUCKET = "nannie_sam3"  # Output GCS bucket for processed videos
+
+# Local output folder for saving downloaded videos
+OUTPUT_FOLDER = "datacam_videos/processed_videos"
+
+# GCS output path for processed videos (format: bucket/folder)
+GCS_OUTPUT_PATH = "datacam_videos/processed_videos"
 
 
 def check_api_health(base_url: str, max_retries: int = 5, retry_delay: int = 5) -> bool:
@@ -72,6 +73,32 @@ def check_api_health(base_url: str, max_retries: int = 5, retry_delay: int = 5) 
     return False
 
 
+def check_polling_endpoint(base_url: str) -> bool:
+    """
+    Check if the polling endpoint is accessible.
+    Tests with a dummy task_id to verify the endpoint responds correctly.
+    """
+    print(f"\nChecking polling endpoint at {base_url}/poll/...") 
+    
+    try:
+        # Test with a dummy task_id - should return 404 (task not found)
+        response = requests.get(f"{base_url}/poll/test-dummy-task-id", timeout=10)
+        
+        if response.status_code == 404:
+            print("✅ Polling endpoint is accessible (returned 404 for non-existent task as expected)")
+            return True
+        elif response.status_code == 200:
+            print("✅ Polling endpoint is accessible")
+            return True
+        else:
+            print(f"⚠️  Polling endpoint returned unexpected status: {response.status_code}")
+            return True  # Still accessible, just unexpected response
+            
+    except requests.RequestException as e:
+        print(f"❌ Error connecting to polling endpoint: {e}")
+        return False
+
+
 # Check API health first
 print("=" * 60)
 print("SAM3 Video Segmentation API - Test Runner")
@@ -81,6 +108,11 @@ if not check_api_health(SERVICE_URL):
     print("\n⚠️  Model not loaded. The request may fail.")
     print("Continuing anyway...")
 
+# Check polling endpoint
+if not check_polling_endpoint(SERVICE_URL):
+    print("\n⚠️  Polling endpoint not accessible. Progress tracking may fail.")
+    print("Continuing anyway...")
+
 print(f"\nTesting /segment/dog endpoint with polling")
 print("-" * 60)
 
@@ -88,7 +120,7 @@ print(f"Configuration:")
 print(f"  Source Bucket: {SOURCE_BUCKET}")
 print(f"  Video UUID: {VIDEO_UUID}")
 print(f"  Video Blob Path: {VIDEO_BLOB_PATH}")
-print(f"  Output Bucket: {GCS_BUCKET}")
+print(f"  Output Path: gs://{GCS_OUTPUT_PATH}/")
 print()
 
 # Step 1: Submit task to /segment/dog
@@ -102,7 +134,7 @@ try:
             "video_blob_path": VIDEO_BLOB_PATH,
             "background_mode": "black",
             "output_format": "mp4",
-            "gcs_bucket": GCS_BUCKET,
+            "gcs_output_path": GCS_OUTPUT_PATH,
         },
         timeout=30
     )
@@ -224,18 +256,23 @@ for attempt in range(max_poll_attempts):
     except requests.RequestException as e:
         # For other request errors, show warning but continue
         if "Read timed out" not in str(e):  # Suppress read timeout messages (handled above)
-            print(f"\n⚠️  Poll error: {e}")
+            print(f"\n Poll error: {e}")
         time.sleep(poll_interval)
         continue
 
 if attempt >= max_poll_attempts - 1:
-    print(f"\n\n⚠️  Timeout: Task did not complete within {max_poll_attempts * poll_interval} seconds")
+    print(f"\n\n  Timeout: Task did not complete within {max_poll_attempts * poll_interval} seconds")
     print(f"Task ID: {task_id}")
     print("You can continue polling manually using:")
     print(f"  curl {SERVICE_URL}/poll/{task_id}")
     sys.exit(1)
 
+# API saves directly to gs://datacam_videos/processed_videos/{task_id}.mp4
+# No copy step needed - output is already in the correct location
+gcs_output_path = f"gs://datacam_videos/processed_videos/{task_id}.mp4"
+print(f"\n📹 Output video saved to: {gcs_output_path}")
+
 print("\n" + "=" * 60)
-print("✅ Test completed successfully!")
+print("Test completed successfully!")
 print("=" * 60)
 

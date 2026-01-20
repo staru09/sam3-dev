@@ -25,7 +25,7 @@ async def process_video_segmentation(
     output_format: OutputFormat,
     include_overlay: bool,
     upload_to_gcs: bool = True,
-    gcs_bucket: str = "nannie_sam3",
+    gcs_output_path: str = "datacam_videos/processed_videos",
 ) -> VideoSegmentationResponse:
     """
     Process video segmentation from uploaded file.
@@ -96,10 +96,16 @@ async def process_video_segmentation(
             if upload_to_gcs:
                 try:
                     from api.utils.gcs_utils import upload_to_gcs as gcs_upload
+                    # Parse gcs_output_path: "bucket/folder" -> bucket="bucket", folder="folder"
+                    path_parts = gcs_output_path.split("/", 1)
+                    bucket_name = path_parts[0]
+                    folder_path = path_parts[1] if len(path_parts) > 1 else ""
+                    blob_name = f"{folder_path}/{task_id}.mp4" if folder_path else f"{task_id}.mp4"
+                    
                     gcs_url = gcs_upload(
                         local_path=str(final_output_path),
-                        bucket_name=gcs_bucket,
-                        destination_blob_name=f"outputs/{task_id}/{task_id}.mp4"
+                        bucket_name=bucket_name,
+                        destination_blob_name=blob_name
                     )
                     gcs_urls.append(gcs_url)
                     print(f"Uploaded to GCS: {gcs_url}")
@@ -155,7 +161,7 @@ async def process_video_from_gcs_async(
     output_format: OutputFormat,
     include_overlay: bool,
     upload_to_gcs: bool = True,
-    gcs_bucket: str = "nannie_sam3",
+    gcs_output_path: str = "datacam_videos/processed_videos",
     task_id: str = None,
 ) -> VideoSegmentationResponse:
     """
@@ -304,10 +310,16 @@ async def process_video_from_gcs_async(
             # Upload to GCS if requested
             if upload_to_gcs:
                 try:
+                    # Parse gcs_output_path: "bucket/folder" -> bucket="bucket", folder="folder"
+                    path_parts = gcs_output_path.split("/", 1)
+                    bucket_name = path_parts[0]
+                    folder_path = path_parts[1] if len(path_parts) > 1 else ""
+                    blob_name = f"{folder_path}/{output_task_id}.mp4" if folder_path else f"{output_task_id}.mp4"
+                    
                     gcs_url = gcs_upload(
                         local_path=str(final_output_path),
-                        bucket_name=gcs_bucket,
-                        destination_blob_name=f"outputs/{output_task_id}/{output_task_id}.mp4"
+                        bucket_name=bucket_name,
+                        destination_blob_name=blob_name
                     )
                     gcs_urls.append(gcs_url)
                     print(f"Uploaded to GCS: {gcs_url}")
@@ -392,7 +404,7 @@ async def process_video_from_gcs(
     output_format: OutputFormat,
     include_overlay: bool,
     upload_to_gcs: bool = True,
-    gcs_bucket: str = "nannie_sam3",
+    gcs_output_path: str = "datacam_videos/processed_videos",
 ) -> VideoSegmentationResponse:
     """
     Process video from GCS bucket.
@@ -486,10 +498,16 @@ async def process_video_from_gcs(
             # Upload to GCS if requested
             if upload_to_gcs:
                 try:
+                    # Parse gcs_output_path: "bucket/folder" -> bucket="bucket", folder="folder"
+                    path_parts = gcs_output_path.split("/", 1)
+                    bucket_name = path_parts[0]
+                    folder_path = path_parts[1] if len(path_parts) > 1 else ""
+                    blob_name = f"{folder_path}/{output_task_id}.mp4" if folder_path else f"{output_task_id}.mp4"
+                    
                     gcs_url = gcs_upload(
                         local_path=str(final_output_path),
-                        bucket_name=gcs_bucket,
-                        destination_blob_name=f"outputs/{output_task_id}/{output_task_id}.mp4"
+                        bucket_name=bucket_name,
+                        destination_blob_name=blob_name
                     )
                     gcs_urls.append(gcs_url)
                     print(f"Uploaded to GCS: {gcs_url}")

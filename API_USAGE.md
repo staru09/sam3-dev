@@ -92,7 +92,7 @@ Segment any object from a video using a text prompt.
 - `output_format` (optional, default: "mp4"): Output video format (mp4, webm, mov)
 - `include_overlay` (optional, default: false): Include visualization video
 - `upload_to_gcs` (optional, default: true): Upload to GCS bucket
-- `gcs_bucket` (optional, default: "nannie_sam3"): GCS bucket name
+- `gcs_output_path` (optional, default: "datacam_videos/processed_videos"): GCS output path in format `bucket/folder`
 
 **cURL Example 1 - Basic (Segment a dog with black background):**
 
@@ -168,18 +168,18 @@ Segment dogs from a video stored in Google Cloud Storage. This endpoint queues t
 - `output_format` (optional, default: "mp4"): Output video format (mp4, webm, mov)
 - `include_overlay` (optional, default: false): Include visualization video
 - `upload_to_gcs` (optional, default: true): Upload results to GCS bucket
-- `gcs_bucket` (optional, default: "nannie_sam3"): GCS bucket name for output
+- `gcs_output_path` (optional, default: "datacam_videos/processed_videos"): GCS output path in format `bucket/folder`
 
 **cURL Example:**
 
 ```bash
 # Step 1: Submit task (returns immediately with task_id)
-curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment/dog" \
+curl -X POST "https://sam3-api-service-405737646974.europe-west4.run.app/segment/dog" \
   -F "source_bucket=datacam_videos" \
   -F "video_uuid=005d0bf7-446c-4a06-867d-5b41e0aa468c" \
   -F "video_blob_path=raw_videos/005d0bf7-446c-4a06-867d-5b41e0aa468c.mkv" \
   -F "background_mode=black" \
-  -F "gcs_bucket=nannie_sam3"
+  -F "gcs_output_path=datacam_videos/processed_videos"
 ```
 
 **Response (Immediate):**
@@ -238,7 +238,7 @@ curl -X GET "https://sam3-api-service-405737646974.europe-west4.run.app/poll/tas
   "progress": 1.0,
   "current_frame": 328,
   "total_frames": 328,
-  "message": "Successfully segmented 1 object(s) matching 'dog' Input UUID: 005d0bf7-446c-4a06-867d-5b41e0aa468c, Output UUID: 68cd0253-4431-401a-85bf-65ac1bf5aacf GCS URLs: gs://nannie_sam3/outputs/68cd0253-4431-401a-85bf-65ac1bf5aacf/segmented.mp4",
+  "message": "Successfully segmented 1 object(s) matching 'dog' Input UUID: 005d0bf7-446c-4a06-867d-5b41e0aa468c, Output UUID: 68cd0253-4431-401a-85bf-65ac1bf5aacf GCS URLs: gs://datacam_videos/processed_videos/68cd0253-4431-401a-85bf-65ac1bf5aacf.mp4",
   "result": {
     "success": true,
     "output_video_path": "/outputs/68cd0253-4431-401a-85bf-65ac1bf5aacf/segmented.mp4",
@@ -311,7 +311,7 @@ response = requests.post(
         "video_blob_path": "raw_videos/005d0bf7-446c-4a06-867d-5b41e0aa468c.mkv",
         "background_mode": "black",
         "output_format": "mp4",
-        "gcs_bucket": "nannie_sam3",
+        "gcs_output_path": "datacam_videos/processed_videos",
     },
     timeout=30
 )
@@ -377,7 +377,7 @@ try:
             "video_uuid": "005d0bf7-446c-4a06-867d-5b41e0aa468c",
             "video_blob_path": "raw_videos/005d0bf7-446c-4a06-867d-5b41e0aa468c.mkv",
             "background_mode": "black",
-            "gcs_bucket": "nannie_sam3",
+            "gcs_output_path": "datacam_videos/processed_videos",
         },
         timeout=30
     )
@@ -445,7 +445,7 @@ TASK_RESPONSE=$(curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/s
   -F "video_uuid=005d0bf7-446c-4a06-867d-5b41e0aa468c" \
   -F "video_blob_path=raw_videos/005d0bf7-446c-4a06-867d-5b41e0aa468c.mkv" \
   -F "background_mode=black" \
-  -F "gcs_bucket=nannie_sam3")
+  -F "gcs_output_path=datacam_videos/processed_videos")
 
 # Extract task_id
 TASK_ID=$(echo $TASK_RESPONSE | jq -r '.task_id')
@@ -503,7 +503,9 @@ curl -X POST "https://sam3-api-service-g6gkfu4ava-ez.a.run.app/segment" \
 
 All processed videos are automatically uploaded to GCS:
 
-**Location:** `gs://nannie_sam3/outputs/<task_id>/`
+**Default Location:** `gs://datacam_videos/processed_videos/<task_id>.mp4`
+
+**Configurable:** Use `gcs_output_path` parameter to specify custom path (format: `bucket/folder`)
 
 **Important Notes:**
 
@@ -514,19 +516,19 @@ All processed videos are automatically uploaded to GCS:
 **List outputs:**
 
 ```bash
-gsutil ls gs://nannie_sam3/outputs/
+gsutil ls gs://datacam_videos/processed_videos/
 ```
 
 **Download from GCS:**
 
 ```bash
-gsutil cp gs://nannie_sam3/outputs/68cd0253-4431-401a-85bf-65ac1bf5aacf/segmented.mp4 ./
+gsutil cp gs://datacam_videos/processed_videos/68cd0253-4431-401a-85bf-65ac1bf5aacf.mp4 ./
 ```
 
 **Download all outputs:**
 
 ```bash
-gsutil -m cp -r gs://nannie_sam3/outputs/* ./local_outputs/
+gsutil -m cp -r gs://datacam_videos/processed_videos/* ./local_outputs/
 ```
 
 ---
@@ -662,7 +664,7 @@ TASK_RESPONSE=$(curl -X POST "https://sam3-api-service-405737646974.europe-west4
   -F "video_uuid=your-video-uuid" \
   -F "video_blob_path=videos/your-video.mp4" \
   -F "background_mode=black" \
-  -F "gcs_bucket=nannie_sam3")
+  -F "gcs_output_path=datacam_videos/processed_videos")
 
 TASK_ID=$(echo $TASK_RESPONSE | jq -r '.task_id')
 echo "Task ID: $TASK_ID"
